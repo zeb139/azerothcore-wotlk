@@ -2703,6 +2703,10 @@ Rate.Drop.Item.Epic             = 1
 Rate.Drop.Item.Legendary        = 1
 Rate.Drop.Item.Artifact         = 1
 Rate.Drop.Item.Referenced       = 1
+Rate.Drop.Item.ExtraCount.DecayFactor = 0.6
+Config.Loot.Budget.Normal = 3
+Config.Loot.Budget.Elite = 0
+Config.Loot.Budget.Boss = 0
 Rate.Drop.Money                 = 1
 
 #    Rate.Drop.Item.ReferencedAmount

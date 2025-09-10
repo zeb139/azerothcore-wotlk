@@ -47,6 +47,10 @@ void WorldConfig::BuildConfigCache()
     SetConfigValue<float>(RATE_DROP_ITEM_ARTIFACT, "Rate.Drop.Item.Artifact", 1.0f);
     SetConfigValue<float>(RATE_DROP_ITEM_REFERENCED, "Rate.Drop.Item.Referenced", 1.0f);
     SetConfigValue<float>(RATE_DROP_ITEM_REFERENCED_AMOUNT, "Rate.Drop.Item.ReferencedAmount", 1.0f);
+    SetConfigValue<float>(RATE_DROP_ITEM_EXTRACOUNT_DECAYFACTOR, "Rate.Drop.Item.ExtraCount.DecayFactor", 0.6f);
+    SetConfigValue<uint32>(CONFIG_LOOT_BUDGET_NORMAL, "Config.Loot.Budget.Normal", 2);
+    SetConfigValue<uint32>(CONFIG_LOOT_BUDGET_ELITE, "Config.Loot.Budget.Elite", 0);
+    SetConfigValue<uint32>(CONFIG_LOOT_BUDGET_BOSS, "Config.Loot.Budget.Boss", 0);
     SetConfigValue<float>(RATE_DROP_ITEM_GROUP_AMOUNT, "Rate.Drop.Item.GroupAmount", 1.0f);
     SetConfigValue<float>(RATE_DROP_MONEY, "Rate.Drop.Money", 1.0f);
 

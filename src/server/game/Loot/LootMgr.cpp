@@ -101,7 +101,7 @@ public:
     bool HasQuestDrop(LootTemplateMap const& store) const;  // True if group includes at least 1 quest drop entry
     bool HasQuestDropForPlayer(Player const* player, LootTemplateMap const& store) const;
     // The same for active quests of the player
-    void Process(Loot& loot, Player const* player, LootStore const& lootstore, uint16 lootMode, uint16 nonRefIterationsLeft) const;    // Rolls an item from the group (if any) and adds the item to the loot
+    void Process(Loot& loot, Player const* player, LootStore const& lootstore, uint16 lootMode, uint16 nonRefIterationsLeft, LootBudgetContext* ctx) const;    // Rolls an item from the group (if any) and adds the item to the loot
     float RawTotalChance() const;                       // Overall chance for the group (without equal chanced items)
     float TotalChance() const;                          // Overall chance for the group
 
@@ -1436,7 +1436,7 @@ void LootTemplate::LootGroup::CopyConditions(ConditionList /*conditions*/)
 }
 
 // Rolls an item from the group (if any takes its chance) and adds the item to the loot
-void LootTemplate::LootGroup::Process(Loot& loot, Player const* player, LootStore const& store, uint16 lootMode, uint16 nonRefIterationsLeft) const
+void LootTemplate::LootGroup::Process(Loot& loot, Player const* player, LootStore const& store, uint16 lootMode, uint16 nonRefIterationsLeft, LootBudgetContext* ctx) const
 {
     if (LootStoreItem const* item = Roll(loot, player, store, lootMode))
     {
@@ -1459,13 +1459,14 @@ void LootTemplate::LootGroup::Process(Loot& loot, Player const* player, LootStor
             // Plain entries (not a reference, not grouped)
             sScriptMgr->OnBeforeDropAddItem(player, loot, rate, lootMode, const_cast<LootStoreItem*>(item), store);
             loot.AddItem(*item); // Chance is already checked, just add
+            ctx->itemsDropped++;
 
             // If we still have non-ref runs to do for this group AND this item wasn't a reference,
             // recursively call this function to produce more items for this group.
             // However, if this is a quest item we shouldn't multiply this group.
             if (nonRefIterationsLeft > 1 && !item->needs_quest)
             {
-                this->Process(loot, player, store, lootMode, nonRefIterationsLeft-1);
+                this->Process(loot, player, store, lootMode, nonRefIterationsLeft-1, ctx);
             }
         }
     }
@@ -1696,9 +1697,18 @@ bool LootTemplate::CopyConditions(LootItem* li, uint32 conditionLootId) const
 }
 
 // Rolls for every item in the template and adds the rolled items the the loot
-void LootTemplate::Process(Loot& loot, LootStore const& store, uint16 lootMode, Player const* player, uint8 groupId, bool isTopLevel) const
+void LootTemplate::Process(Loot& loot, LootStore const& store, uint16 lootMode, Player const* player, uint8 groupId, bool isTopLevel, LootBudgetContext* ctx) const
 {
     bool rate = store.IsRatesAllowed();
+
+    LootBudgetContext localCtx;
+    if (!ctx)
+    {
+        ctx = &localCtx;
+        ctx->itemsDropped = 0;
+        ctx->nextItemChance = 100.0f;
+        ctx->numItemsCap = sWorld->getIntConfig(CONFIG_LOOT_BUDGET_NORMAL);
+    }
 
     if (groupId)                                            // Group reference uses own processing of the group
     {
@@ -1711,16 +1721,17 @@ void LootTemplate::Process(Loot& loot, LootStore const& store, uint16 lootMode, 
         // Rate.Drop.Item.GroupAmount is only in effect for the top loot template level
         if (isTopLevel)
         {
-            Groups[groupId - 1]->Process(loot, player, store, lootMode, sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT));
+            Groups[groupId - 1]->Process(loot, player, store, lootMode, sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT), ctx);
         }
         else
         {
-            Groups[groupId - 1]->Process(loot, player, store, lootMode, 0);
+            Groups[groupId - 1]->Process(loot, player, store, lootMode, 0, ctx);
         }
         return;
     }
 
     // Rolling non-grouped items
+    std::vector<LootStoreItem*> candidateItems;
     for (LootStoreItemList::const_iterator i = Entries.begin(); i != Entries.end(); ++i)
     {
         LootStoreItem* item = *i;
@@ -1735,22 +1746,48 @@ void LootTemplate::Process(Loot& loot, LootStore const& store, uint16 lootMode, 
             if (!Referenced)
                 continue;                                       // Error message already printed at loading stage
 
+            // Before adding the item, check budget
+            if (ctx->numItemsCap > 0 && ctx->itemsDropped >= ctx->numItemsCap)
+            {
+                break; // budget reached, skip
+            }
             uint32 maxcount = uint32(float(item->maxcount) * sWorld->getRate(RATE_DROP_ITEM_REFERENCED_AMOUNT));
             sScriptMgr->OnAfterRefCount(player, loot, rate, lootMode, item, maxcount, store);
             for (uint32 loop = 0; loop < maxcount; ++loop)      // Ref multiplicator
                 // we're no longer in the top level, so isTopLevel is false
-                Referenced->Process(loot, store, lootMode, player, item->groupid, false);
+                Referenced->Process(loot, store, lootMode, player, item->groupid, false, ctx);
         }
         else
         {
             // Plain entries (not a reference, not grouped)
-            sScriptMgr->OnBeforeDropAddItem(player, loot, rate, lootMode, item, store);
-            loot.AddItem(*item);                                // Chance is already checked, just add
+            if (item->needs_quest)
+            {
+                sScriptMgr->OnBeforeDropAddItem(player, loot, rate, lootMode, item, store);
+                loot.AddItem(*item); 
+            } 
+            else
+                candidateItems.push_back(item);
         }
+    }
+
+    // Sort candidate items by chance, lowest chance first
+    // Then add them one by one until budget is reached
+    std::sort(candidateItems.begin(), candidateItems.end(), [](LootStoreItem* a, LootStoreItem* b) { return a->chance < b->chance; });
+    for (LootStoreItem* item : candidateItems)
+    {
+        // Before adding the item, check budget
+        if (ctx->numItemsCap > 0 && ctx->itemsDropped >= ctx->numItemsCap)
+        {
+            break; // budget reached, skip
+        }
+        sScriptMgr->OnBeforeDropAddItem(player, loot, rate, lootMode, item, store);
+        loot.AddItem(*item);                                          // Chance is already checked, just add
+        ctx->itemsDropped++;
     }
 
     // Now processing groups
     for (LootGroups::const_iterator i = Groups.begin(); i != Groups.end(); ++i)
+    {
         if (LootGroup* group = *i)
         {
             // Rate.Drop.Item.GroupAmount is only in effect for the top loot template level
@@ -1758,13 +1795,14 @@ void LootTemplate::Process(Loot& loot, LootStore const& store, uint16 lootMode, 
             {
                 uint32 groupAmount = sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT);
                 sScriptMgr->OnAfterCalculateLootGroupAmount(player, loot, lootMode, groupAmount, store);
-                group->Process(loot, player, store, lootMode, groupAmount);
+                group->Process(loot, player, store, lootMode, groupAmount, ctx);
             }
             else
             {
-                group->Process(loot, player, store, lootMode, 0);
+                group->Process(loot, player, store, lootMode, 0, ctx);
             }
         }
+    }
 }
 
 // True if template includes at least 1 quest drop entry

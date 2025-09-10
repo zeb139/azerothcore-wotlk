@@ -181,6 +181,13 @@ struct LootItem
     [[nodiscard]] const AllowedLooterSet& GetAllowedLooters() const { return allowedGUIDs; }
 };
 
+struct LootBudgetContext
+{
+    uint32 itemsDropped = 0;   // how many items already added to available loot
+    float  nextItemChance = 100.0f; // chance for next item to be added to available loot
+    uint32 numItemsCap = 0;      // 0 = unlimited
+};
+
 struct QuestItem
 {
     uint8   index{0};                                          // position in quest_items;
@@ -253,7 +260,7 @@ public:
     // Adds an entry to the group (at loading stage)
     void AddEntry(LootStoreItem* item);
     // Rolls for every item in the template and adds the rolled items the the loot
-    void Process(Loot& loot, LootStore const& store, uint16 lootMode, Player const* player, uint8 groupId = 0, bool isTopLevel = true) const;
+    void Process(Loot& loot, LootStore const& store, uint16 lootMode, Player const* player, uint8 groupId = 0, bool isTopLevel = true, LootBudgetContext* ctx = nullptr) const;
     void CopyConditions(ConditionList conditions);
     bool CopyConditions(LootItem* li, uint32 conditionLootId = 0) const;
 
